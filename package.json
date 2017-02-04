@@ -22,6 +22,7 @@
 		"request": "^2.72.0",
 		"express": "*",
 		"body-parser": "*",
-		"node-wit": "^4.1.0"
+		"node-wit": "^4.1.0",
+		"facebook-events-by-location-core": "^0.1.5"
 	}
 }
