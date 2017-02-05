@@ -84,10 +84,8 @@ function receivedMessage(event) {
   console.log("Received message for user %d and page %d at %d with message:", 
     senderID, recipientID, timeOfMessage);
   console.log(JSON.stringify(message));
-  console.log(JSON.stringify(message.attachments));
 
   var messageId = message.mid;
-
   var messageText = message.text;
   var messageAttachments = message.attachments;
   
@@ -120,6 +118,10 @@ function receivedMessage(event) {
               //messageAttachments, // the users data
               sessions[sessionId].context // the user's current session state
             ).then((context) => {
+          
+              console.log("sessions context")
+              console.log(sessions[sessionId].context)
+          
               // Our bot did everything it has to do.
               // Now it's waiting for further messages to proceed.
               console.log('Waiting for next user messages');
@@ -141,7 +143,9 @@ function receivedMessage(event) {
   } else if (messageAttachments) {
     if (messageAttachments[0].type === "location"){
       let {lat, long} = messageAttachments[0].payload.coordinates
-      getLocalEvents(senderID, lat, long);
+      getLocalEvents(senderID, lat, long); //senderID
+      //console.log(local_events);
+      //sendLocalEventGenericMessage(senderID, local_events);
     } else {
       sendTextMessage(senderID, "Message with attachment received");
     }
@@ -203,7 +207,7 @@ const actions = {
       // Yay, we found our recipient!
       // Let's forward our bot response to her.
       // We return a promise to let our bot know when we're done sending
-      return sendTextMessage(recipientId, text, quickreplies)
+      return sendTextMessage(recipientId, text, quickreplies);/*
       .then(() => null)
       .catch((err) => {
         console.error(
@@ -212,7 +216,7 @@ const actions = {
           ':',
           err.stack || err
         );
-      });
+      });*/
     } else {
       console.error('Oops! Couldn\'t find user for session:', sessionId);
       // Giving the wheel back to our bot
@@ -230,45 +234,48 @@ const actions = {
       console.log("Intent: ")
       console.log(entities.intent)
       
-      switch (entities.intent[0].value) {
-        case 'findEvent':
-          console.log("Executing findEvent");
-          
-          let selectedEvent = selectEvent(entities)
-          
-          sendEventGenericMessage(sessions[sessionId].fbid, [selectedEvent]);
-          
-          context.eventTitle = selectedEvent.title;
-          break;
-        case 'findEventCategory':
-          break;
-        case 'findEventTime':
-          console.log("Executing findEventTime");
-          
-          let result = selectEvent(entities);
-          
-          var options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' };
-          
-          context.startTime = dateToReadableString(result.startTime, options);
-          context.endTime = dateToReadableString(result.endTime, options);
-          break;
-        case 'findEventLocation':
-          console.log("Executing findEventLocation");
-          console.log(entities);
-          
-          let selectedEvent2 = selectEvent(entities);
-          console.log(context)
-          console.log(selectedEvent2)
-          
-          context.eventTitle = selectedEvent2.title;
-          context.locationPlace = selectedEvent2.location.place;
-          context.locationCity = selectedEvent2.location.city;
-          
-          break;
-        default:
-          console.log("No")
-      }
+      if(entities.intent[0]) {
       
+        switch (entities.intent[0].value) {
+          case 'findEvent':
+            console.log("Executing findEvent");
+
+            let selectedEvent = selectEvent(entities)
+
+            sendEventGenericMessage(sessions[sessionId].fbid, [selectedEvent]);
+
+            context.eventTitle = selectedEvent.title;
+            break;
+          case 'findEventCategory':
+            break;
+          case 'findEventTime':
+            console.log("Executing findEventTime");
+
+            let result = selectEvent(entities);
+
+            var options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+
+            context.startTime = dateToReadableString(result.startTime, options);
+            context.endTime = dateToReadableString(result.endTime, options);
+            break;
+          case 'findEventLocation':
+            console.log("Executing findEventLocation");
+            console.log(entities);
+
+            let selectedEvent2 = selectEvent(entities);
+            console.log(context)
+            console.log(selectedEvent2)
+
+            context.eventTitle = selectedEvent2.title;
+            context.locationPlace = selectedEvent2.location.place;
+            context.locationCity = selectedEvent2.location.city;
+
+            break;
+          default:
+            console.log("No")
+            context.errorMessage = true;
+        }
+      }
       return resolve(context);
     });
   },
@@ -322,9 +329,6 @@ const actions = {
       //console.log(entities.category[0].value)
       //console.log(dateToReadableString(entities.datetime[0].value));
       
-      console.log("Time")
-      console.log(entities.datetime[0])
-      
       var selectedEvents = events.filter(function(event) {
         
         // only consider checking whether this event should be returned
@@ -351,7 +355,8 @@ const actions = {
         context.missingEvents = 'missing';
       } else {
         context.events = selectedEvents;
-        context.eventDay = entities.datetime[0].value.toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'});
+        if (typeof entities.datetime !== 'undefined')
+          context.eventDay = entities.datetime[0].value.toLocaleString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'});
       }
       if (context.events) { sendEventGenericMessage(sessions[sessionId].fbid, context.events); }
       
@@ -446,24 +451,31 @@ function dateToReadableString(timestamp) {
 }
 
 function getLocalEvents(recipientId, lat, lng){
+  var events_limit;
   var es = new EventSearch({
-    "lat": lat,
-    "lng": lng,
+    "lat": lat || 44.2312, //defaults to Kingston if no coordinates are passed in
+    "lng": lng || -76.4860,
     "distance": 1000, // 1 km
     "sort": "popularity"
   });
 
   es.search().then(function (events) {
-    var events_limit;
     if(events.events.length > 10){
       events_limit = events.events.slice(0,10);
     } else {
       events_limit = events.events;
     }
     sendLocalEventGenericMessage(recipientId, events_limit);
-  }).catch(function (error) {
+    console.log(JSON.stringify(events_limit));
+    
+    }).catch(function (error) {
       console.error(JSON.stringify(error));
   });
+  
+  console.log(es);
+  console.log(events_limit);
+  
+  //return (events_limit);
 }
 
 
@@ -539,7 +551,7 @@ function sendLocalEventGenericMessage(recipientId, eventObjectList) {
     messageData.message.attachment.payload.elements.push(
       {
         title: eventObjectList[e].name,
-        subtitle: dateToReadableString(dateTime) + eventObjectList[e].venue.location, 
+        subtitle: dateToReadableString(dateTime) + eventObjectList[e].venue.location.keys, 
         item_url: item_url,
         image_url: eventObjectList[e].coverPicture,
         buttons: [{
