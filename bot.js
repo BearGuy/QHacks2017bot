@@ -8,12 +8,15 @@ const request = require('request');
 const path = require('path');
 const categories = require('./categories');
 const events = require('./events');
+const NodeCache = require('node-cache');
 
+var filterChoice;
 var EventSearch = require("facebook-events-by-location-core");
 var Wit = require('node-wit').Wit;
 var messengerButton = "<html><head><title>Facebook Messenger Bot</title></head><body><h3>QHacks 2017 Facebook Messenger Bot Example</h3>This is a bot based on Messenger Platform QuickStart. Find more details <a href=\"https://developers.facebook.com/docs/messenger-platform/guides/quick-start\">here</a><br><hr><p><a href=\"https://gomix.com/#!/remix/messenger-bot/ca73ace5-3fff-4b8f-81c5-c64452145271\"><img src=\"https://gomix.com/images/background-light/remix-on-gomix.svg\"></a></p><p><a href=\"https://gomix.com/#!/project/messenger-bot\">View Code</a></p></body></html>";
 
 // The rest of the code implements the routes for our Express server.
+const myCache = new NodeCache();
 let app = express();
 
 app.use(bodyParser.json());
@@ -88,30 +91,19 @@ function receivedMessage(event) {
   var messageId = message.mid;
   var messageText = message.text;
   var messageAttachments = message.attachments;
-  
-  // var lat = messageAttachments[0].payload.coordinates.lat;
-  // var lng = messageAttachments[0].payload.coordinates.long;
+  const sessionId = findOrCreateSession(senderID);
 
   if (messageText) {
     
     // If we receive a text message, check to see if it matches a keyword
     // and send back the template example. Otherwise, just echo the text we received.
-    switch (messageText) {
-      case 'generic':
-        sendGenericMessage(senderID);
-        break;
-        /*
-      case 'hello':
-        sendTextMessage(senderID, 'Hello yourself!');
-        break;
-        */
-      default:
-        //sendTextMessage(senderID, messageText);
-        
+    if(messageText === 'Popular' || messageText === 'Close' || messageText === 'Soon') {
+        filterChoice = messageText;
+        sendLocationPrompt(sessions[sessionId].fbid);
         // We retrieve the user's current session, or create one if it doesn't exist
         // This is needed for our bot to figure out the conversation history
-        const sessionId = findOrCreateSession(senderID);
-        
+     } else {   
+       
         wit.runActions(
               sessionId, // the user's current session
               messageText, // the user's message
@@ -139,13 +131,27 @@ function receivedMessage(event) {
             .catch((err) => {
               console.error('Oops! Got an error from Wit: ', err.stack || err);
             })
-    }
-  } else if (messageAttachments) {
-    if (messageAttachments[0].type === "location"){
-      let {lat, long} = messageAttachments[0].payload.coordinates
-      getLocalEvents(senderID, lat, long); //senderID
-      //console.log(local_events);
-      //sendLocalEventGenericMessage(senderID, local_events);
+      }
+    } else if (messageAttachments) {
+      if (messageAttachments[0].type === "location"){
+        //sendLocalEventFilterChoice(senderID);
+        var sortBy;
+        switch(filterChoice){
+          case 'Close':
+            sortBy = 'distance'
+            break;
+          case 'Soon':
+            sortBy = 'time'
+            break;
+          case 'Popular':
+            sortBy = 'popularity';
+            break;
+          default:
+            break;
+        }
+        let {lat, long} = messageAttachments[0].payload.coordinates
+        getLocalEvents(senderID, lat, long, sortBy, null); //senderID
+      
     } else {
       sendTextMessage(senderID, "Message with attachment received");
     }
@@ -364,11 +370,39 @@ const actions = {
     });
   },
   
-  findLocalEvents({sessionId, context, entities}) {
+  getLocalEventsByAttribute({sessionId, context, entities}) {
     return new Promise(function(resolve, reject) {
-      sendLocationPrompt(sessions[sessionId].fbid);
+      switch(entities.intent[0].value){
+        case 'findLocalEventsDatetime':
+          getLocalEvents(sessions[sessionId].fbid, null, null, 'time', datetimeToUnixtime(entities.datetime[0].value));
+          context.events = true;
+          context.time = dateToReadableString(entities.datetime[0].value);
+          break;
+        case 'findLocalEventsProximity':
+          getLocalEvents(sessions[sessionId].fbid, null, null, 'distance', datetimeToUnixtime(entities.datetime[0].value));
+          context.events = true;
+          context.time = dateToReadableString(entities.datetime[0].value);
+          break;
+        default:
+          getLocalEvents(sessions[sessionId].fbid);
+      }
+      return resolve(context);
     });
   },
+  
+  findLocalEvents({sessionId, context, entities}) {
+    return new Promise(function(resolve, reject) {
+      sendLocalEventFilterChoice(sessions[sessionId].fbid);
+      //sendLocationPrompt(sessions[sessionId].fbid);
+    });
+  },
+  
+  getSecret({context, entities}){
+    return new Promise(function(resolve, reject){
+      context.secret = 'ssh-rsa AAAAB3NzaC1yc2EAAAABJQAAAQB/nAmOjTmezNUDKYvEeIRf2YnwM9/uUG1d0BYsc8/tRtx+RGi7N2lUbp728MXGwdnL9od4cItzky/zVdLZE2cycOa18xBK9cOWmcKS0A8FYBxEQWJ/q9YVUgZbFKfYGaGQxsER+A0w/fX8ALuk78ktP31K69LcQgxIsl7rNzxsoOQKJ/CIxOGMMxczYTiEoLvQhapFQMs3FL96didKr/QbrfB1WT6s3838SEaXfgZvLef1YB2xmfhbT9OXFE3FXvh2UPBfN+ffE7iiayQf/2XR+8j4N4bW30DiPtOQLGUrH1y5X/rpNZNlWW2+jGIxqZtgWg7lTy3mXy5x836Sj/6L';
+      resolve(context);
+    });
+}
 };
 
 // Setting up our bot
@@ -385,7 +419,7 @@ function selectEvent(entities) {
   
   // find event matching 
   return events.find(function(event) {
-    return entities.event[0].value === event.title;
+    return entities.event[0].value.toLowerCase() === event.title.toLowerCase();
 /*
     if (entities.intent[0].value === 'findEvent' && ) {
       console.log(event.title)
@@ -435,6 +469,12 @@ function sameDate(dateTime1, dateTime2, sameTimeToo=false) {
   return dateTime1 === dateTime2;
 }
 
+function datetimeToUnixtime(dateTime){
+  dateTime = new Date(Date.parse(dateTime));
+  dateTime = dateTime.getTime()/1000;
+  return dateTime
+}
+
 function withinDateRange(dateTime1, dateTimeRange1, dateTimeRange2) {
   dateTime1 = new Date(Date.parse(dateTime1))
   dateTimeRange1 = new Date(Date.parse(dateTimeRange1))
@@ -450,13 +490,14 @@ function dateToReadableString(timestamp) {
   return result.toLocaleString('en-US', formattingOptions) + " at " + result.toLocaleTimeString({hour: 'numeric', minute: '2-digit', timeZoneName: 'short'});
 }
 
-function getLocalEvents(recipientId, lat, lng){
+function getLocalEvents(recipientId, lat, lng, sort_type, time_filter){
   var events_limit;
   var es = new EventSearch({
     "lat": lat || 44.2312, //defaults to Kingston if no coordinates are passed in
     "lng": lng || -76.4860,
     "distance": 1000, // 1 km
-    "sort": "popularity"
+    "sort": sort_type || "popularity",
+    "since": time_filter || null
   });
 
   es.search().then(function (events) {
@@ -466,18 +507,11 @@ function getLocalEvents(recipientId, lat, lng){
       events_limit = events.events;
     }
     sendLocalEventGenericMessage(recipientId, events_limit);
-    console.log(JSON.stringify(events_limit));
     
     }).catch(function (error) {
       console.error(JSON.stringify(error));
   });
-  
-  console.log(es);
-  console.log(events_limit);
-  
-  //return (events_limit);
 }
-
 
 //////////////////////////
 // Sending helpers
@@ -525,6 +559,35 @@ function sendLocationPrompt(recipientId) {
   callSendAPI(messageData);
 }
 
+function sendLocalEventFilterChoice(recipientId) {
+  var choiceData = {
+    "recipient":{
+      "id": recipientId
+    },
+    "message":{
+      "text":"Pick an event filter:",
+      "quick_replies":[
+        {
+          "content_type":"text",
+          "title":"Close",
+          "payload":"Close"
+        },
+        {
+          "content_type":"text",
+          "title":"Soon",
+          "payload":"Soon"
+        },
+        {
+          "content_type":"text",
+          "title":"Popular",
+          "payload":"Popular"
+        },
+      ]
+    }
+  }
+  callSendAPI(choiceData);
+}
+
 // send event data following the generic template
 function sendLocalEventGenericMessage(recipientId, eventObjectList) {
   var messageData = {
@@ -546,12 +609,14 @@ function sendLocalEventGenericMessage(recipientId, eventObjectList) {
     
     let dateTime = new Date(Date.parse(eventObjectList[e].startTime))
 
-    let item_url = 'https://facebook.com/events/' + eventObjectList[e].id; 
+    let item_url = 'https://facebook.com/events/' + eventObjectList[e].id;
+    let {city, state, country} = eventObjectList[e].venue.location;
+    let location = `\n${city}, ${state}, ${country}`
     
     messageData.message.attachment.payload.elements.push(
       {
         title: eventObjectList[e].name,
-        subtitle: dateToReadableString(dateTime) + eventObjectList[e].venue.location.keys, 
+        subtitle: dateToReadableString(dateTime) + location, 
         item_url: item_url,
         image_url: eventObjectList[e].coverPicture,
         buttons: [{
@@ -588,12 +653,13 @@ function sendEventGenericMessage(recipientId, eventObjectList) {
 
   for (let e in eventObjectList) {
     
-    let dateTime = new Date(Date.parse(eventObjectList[e].startTime))
+    let dateTime = new Date(Date.parse(eventObjectList[e].startTime));
+    let location = eventObjectList[e].location.city;
     
     messageData.message.attachment.payload.elements.push(
       {
         title: eventObjectList[e].title,
-        subtitle: dateToReadableString(dateTime) + "\n Kingston, Ontario", // eventObjectList[e].location,
+        subtitle: dateToReadableString(dateTime) + "\n" + location, 
         item_url: eventObjectList[e].item_url,
         image_url: eventObjectList[e].image_url,
         buttons: [{
@@ -679,6 +745,58 @@ function callSendAPI(messageData) {
       console.error(error);
     }
   });  
+}
+
+function createPersistentMenu() {
+  
+  let messageData = 
+    {
+      "setting_type" : "call_to_actions",
+      "thread_state" : "existing_thread",
+      "call_to_actions":[
+        {
+          "type":"postback",
+          "title":"Help",
+          "payload":"DEVELOPER_DEFINED_PAYLOAD_FOR_HELP"
+        },
+        {
+          "type":"postback",
+          "title":"Start a New Order",
+          "payload":"DEVELOPER_DEFINED_PAYLOAD_FOR_START_ORDER"
+        },
+        {
+          "type":"web_url",
+          "title":"Checkout",
+          "url":"http://petersapparel.parseapp.com/checkout",
+          "webview_height_ratio": "full",
+          "messenger_extensions": true
+        },
+        {
+          "type":"web_url",
+          "title":"View Website",
+          "url":"http://petersapparel.parseapp.com/"
+        }
+      ]
+    };
+  
+  
+  
+  request({
+    uri: "https://graph.facebook.com/v2.6/me/thread_settings",
+    qs: { access_token: process.env.PAGE_ACCESS_TOKEN },
+    method: 'POST',
+    json: messageData
+  }), function (error, response, body) {
+    if (!error && response.statusCode == 200) {
+      var result = body.result;
+
+      console.log("%s", result);
+    } else {
+      console.error("Unable to send message.");
+      console.error(response);
+      console.error(error);
+    }
+  }  
 }
 
 // Set Express to listen out for HTTP requests

@@ -23,6 +23,7 @@
 		"express": "*",
 		"body-parser": "*",
 		"node-wit": "^4.1.0",
-		"facebook-events-by-location-core": "^0.1.5"
+		"facebook-events-by-location-core": "^0.1.5",
+		"node-cache": "^4.1.1"
 	}
 }
