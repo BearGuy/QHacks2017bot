@@ -10,6 +10,7 @@ const categories = require('./categories');
 const events = require('./events');
 const NodeCache = require('node-cache');
 
+var filterChoice;
 var EventSearch = require("facebook-events-by-location-core");
 var Wit = require('node-wit').Wit;
 var messengerButton = "<html><head><title>Facebook Messenger Bot</title></head><body><h3>QHacks 2017 Facebook Messenger Bot Example</h3>This is a bot based on Messenger Platform QuickStart. Find more details <a href=\"https://developers.facebook.com/docs/messenger-platform/guides/quick-start\">here</a><br><hr><p><a href=\"https://gomix.com/#!/remix/messenger-bot/ca73ace5-3fff-4b8f-81c5-c64452145271\"><img src=\"https://gomix.com/images/background-light/remix-on-gomix.svg\"></a></p><p><a href=\"https://gomix.com/#!/project/messenger-bot\">View Code</a></p></body></html>";
@@ -90,33 +91,19 @@ function receivedMessage(event) {
   var messageId = message.mid;
   var messageText = message.text;
   var messageAttachments = message.attachments;
-  
-  // var lat = messageAttachments[0].payload.coordinates.lat;
-  // var lng = messageAttachments[0].payload.coordinates.long;
+  const sessionId = findOrCreateSession(senderID);
 
   if (messageText) {
     
     // If we receive a text message, check to see if it matches a keyword
     // and send back the template example. Otherwise, just echo the text we received.
-    switch (messageText) {
-      case 'generic':
-        sendGenericMessage(senderID);
-        break;
-      case 'add menu':
-        createPersistentMenu();
-        break 
-        /*
-      case 'hello':
-        sendTextMessage(senderID, 'Hello yourself!');
-        break;
-        */
-      default:
-        //sendTextMessage(senderID, messageText);
-        
+    if(messageText === 'Popular' || messageText === 'Close' || messageText === 'Soon') {
+        filterChoice = messageText;
+        sendLocationPrompt(sessions[sessionId].fbid);
         // We retrieve the user's current session, or create one if it doesn't exist
         // This is needed for our bot to figure out the conversation history
-        const sessionId = findOrCreateSession(senderID);
-        
+     } else {   
+       
         wit.runActions(
               sessionId, // the user's current session
               messageText, // the user's message
@@ -144,25 +131,27 @@ function receivedMessage(event) {
             .catch((err) => {
               console.error('Oops! Got an error from Wit: ', err.stack || err);
             })
-    }
-  } else if (messageAttachments) {
-    if (messageAttachments[0].type === "location"){
-      let {lat, long} = messageAttachments[0].payload.coordinates
-      var coordinates = { lat, long };
-      var success = myCache.get("user_coordinates");
-      
-      if (success === undefined){
-        var value = myCache.set("user_coordinates", coordinates);
-      } else {
-        var value = myCache.del("user_coordinates");
-        value = myCache.set("user_coordinates", coordinates);
       }
-      var value = myCache.get( "user_coordinates" );
-      console.log(value);
+    } else if (messageAttachments) {
+      if (messageAttachments[0].type === "location"){
+        //sendLocalEventFilterChoice(senderID);
+        var sortBy;
+        switch(filterChoice){
+          case 'Close':
+            sortBy = 'distance'
+            break;
+          case 'Soon':
+            sortBy = 'time'
+            break;
+          case 'Popular':
+            sortBy = 'popularity';
+            break;
+          default:
+            break;
+        }
+        let {lat, long} = messageAttachments[0].payload.coordinates
+        getLocalEvents(senderID, lat, long, sortBy, null); //senderID
       
-      getLocalEvents(senderID, lat, long); //senderID
-      
-      // sendLocalEventGenericMessage(senderID, local_events);
     } else {
       sendTextMessage(senderID, "Message with attachment received");
     }
@@ -383,7 +372,6 @@ const actions = {
   
   getLocalEventsByAttribute({sessionId, context, entities}) {
     return new Promise(function(resolve, reject) {
-      //console.log(entities.intent);
       switch(entities.intent[0].value){
         case 'findLocalEventsDatetime':
           getLocalEvents(sessions[sessionId].fbid, null, null, 'time', datetimeToUnixtime(entities.datetime[0].value));
@@ -404,7 +392,8 @@ const actions = {
   
   findLocalEvents({sessionId, context, entities}) {
     return new Promise(function(resolve, reject) {
-      sendLocationPrompt(sessions[sessionId].fbid);
+      sendLocalEventFilterChoice(sessions[sessionId].fbid);
+      //sendLocationPrompt(sessions[sessionId].fbid);
     });
   },
   
@@ -568,6 +557,35 @@ function sendLocationPrompt(recipientId) {
     }
   }
   callSendAPI(messageData);
+}
+
+function sendLocalEventFilterChoice(recipientId) {
+  var choiceData = {
+    "recipient":{
+      "id": recipientId
+    },
+    "message":{
+      "text":"Pick an event filter:",
+      "quick_replies":[
+        {
+          "content_type":"text",
+          "title":"Close",
+          "payload":"Close"
+        },
+        {
+          "content_type":"text",
+          "title":"Soon",
+          "payload":"Soon"
+        },
+        {
+          "content_type":"text",
+          "title":"Popular",
+          "payload":"Popular"
+        },
+      ]
+    }
+  }
+  callSendAPI(choiceData);
 }
 
 // send event data following the generic template
