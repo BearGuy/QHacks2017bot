@@ -1,6 +1,8 @@
 
 # queb
 
+Link to [devpost](https://devpost.com/software/quebchatbot) for more information 
+
 queb (Queen's University Event Bot) is a Facebook Messenger chat bot allowing users to learn about local events in their area. It is aimed at Queen's students and residents of Kingston, but anyone can converse with the bot to learn about events in their area.
 
 Built by Stephen ([@BearGuy](http://github.com/bearguy)) and Simon ([@skhzhang](http://github.com/skhzhang)) at QHacks 2017 ([qhacks.io](qhacks.io)) at Queen's University within a timespan of 36 hours. It was the first time we ever worked with chat bots or Natural Language Processing, and was an amazing way to learn.
